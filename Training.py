@@ -1,3 +1,7 @@
+import os
+import warnings
+from sklearn.exceptions import UndefinedMetricWarning
+
 import pytorch_lightning as pl
 import torch
 import torch.nn as nn
@@ -5,13 +9,14 @@ from pytorch_lightning import Trainer, seed_everything
 from pytorch_lightning.loggers.csv_logs import CSVLogger
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 
-from sklearn.metrics import f1_score
+from sklearn.metrics import classification_report
+from sklearn.metrics import f1_score, accuracy_score, precision_score, recall_score
 
 from CNN import CNN14, get_mel_transform
 from Classic_CNN import get_cnn
 from Constants import NB_CLASSES
 from DataLoader import DataModule
-from utils import WrongParameter
+from utils import WrongParameter, save_dict
 
 
 class DNN_clf(pl.LightningModule):
@@ -53,10 +58,11 @@ class DNN_clf(pl.LightningModule):
         y_hat = self(x)
 
         loss = self.get_loss(y_hat, y)
-        f1 = self.get_metrics(y_hat, y)
+        f1, acc, precision, recall = self.get_metrics(y_hat, y)
 
         self.log('train_loss', loss, on_step=True, on_epoch=True, logger=True)
         self.log('train_f1', f1, on_step=True, on_epoch=True, logger=True)
+        self.log('train_acc', acc, on_step=True, on_epoch=True, logger=True)
 
         return loss
 
@@ -67,10 +73,11 @@ class DNN_clf(pl.LightningModule):
         y_hat = self(x)
 
         loss = self.get_loss(y_hat, y)
-        f1 = self.get_metrics(y_hat, y)
+        f1, acc, precision, recall = self.get_metrics(y_hat, y)
 
         self.log('val_loss', loss, on_step=True, on_epoch=True, logger=True)
         self.log('val_f1', f1, on_step=True, on_epoch=True, logger=True)
+        self.log('val_acc', acc, on_step=True, on_epoch=True, logger=True)
 
         return loss
 
@@ -79,12 +86,16 @@ class DNN_clf(pl.LightningModule):
 
         x = self.val_transform(x)
         y_hat = self(x)
+        print('y_hat', y_hat.shape)
 
         loss = self.get_loss(y_hat, y)
-        f1 = self.get_metrics(y_hat, y)
+        f1, acc, precision, recall = self.get_metrics(y_hat, y, per_class_metrics=True)
 
         self.log('test_loss', loss, on_step=True, on_epoch=True, logger=True)
         self.log('test_f1', f1, on_step=True, on_epoch=True, logger=True)
+        self.log('test_acc', acc, on_step=True, on_epoch=True, logger=True)
+        self.log('test_precision', precision, on_step=True, on_epoch=True, logger=True)
+        self.log('test_recall', recall, on_step=True, on_epoch=True, logger=True)
 
         return loss
 
@@ -94,20 +105,37 @@ class DNN_clf(pl.LightningModule):
         return loss
 
     @staticmethod
-    def get_metrics(y_hat, y):
+    def get_metrics(y_hat, y, per_class_metrics=False):
         y_classes = y.cpu().argmax(1)
         y_hat_classes = y_hat.cpu().argmax(1)
-        f1 = f1_score(y_hat_classes, y_classes, average='weighted')
 
-        return f1
+        f1 = f1_score(y_hat_classes, y_classes, average='weighted')
+        acc = accuracy_score(y_hat_classes, y_classes)
+        precision = precision_score(y_hat_classes, y_classes, average='weighted')
+        recall = recall_score(y_hat_classes, y_classes, average='weighted')
+
+        if per_class_metrics is True:
+            results = classification_report(y_classes, y_hat_classes, output_dict=True)
+            save_dict(results, os.path.join('data_csv', 'per_class_metrics.csv'))
+
+        return f1, acc, precision, recall
 
 
 def main(short_sample):
+    warnings.filterwarnings(action='ignore', category=UndefinedMetricWarning)
+
+    if short_sample is True:
+        nb_epochs = 2
+        batch_size = 4
+    else:
+        nb_epochs = 100
+        batch_size = 16
+
     p = dict(
         seq_len=int(0.75e6),
-        batch_size=16,
+        batch_size=batch_size,
         criterion=nn.CrossEntropyLoss(),
-        max_epochs=100,
+        max_epochs=nb_epochs,
         num_layers=5,
         dropout=0.2,
         learning_rate=0.001,
@@ -131,8 +159,11 @@ def main(short_sample):
                              model=p['model'])
 
     trainer.fit(model, data_module)
-    trainer.test(model, datamodule=data_module)
+    results = trainer.test(model, datamodule=data_module, ckpt_path='best')[0]
+
+    params = {**p, **results}
+    save_dict(params, os.path.join('data_csv', 'results.csv'))
 
 
-# TODO: Pre-processing, add more metrics with y_pred
-main(short_sample=False)
+# TODO: Pre-processing, Move wav to np format, metric per pathology
+main(short_sample=True)

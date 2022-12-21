@@ -1,55 +1,46 @@
-import h2o
-import librosa
-import matplotlib.pyplot as plt
-import pandas as pd
-import os
-import numpy as np
-from tqdm import tqdm
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler, LabelEncoder
-
-# Neural Networks
+import pytorch_lightning as pl
 import torch
 import torch.nn as nn
-
-from torch.utils.data import Dataset, DataLoader
-
-import pytorch_lightning as pl
 from pytorch_lightning import Trainer, seed_everything
 from pytorch_lightning.loggers.csv_logs import CSVLogger
+from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 
+from sklearn.metrics import f1_score
+
+from CNN import CNN14, get_mel_transform
+from Classic_CNN import get_cnn
+from Constants import NB_CLASSES
 from DataLoader import DataModule
-
-CLASSES = 1
+from utils import WrongParameter
 
 
 class DNN_clf(pl.LightningModule):
-    def __init__(self, num_layers, batch_size, learning_rate, criterion):
+    def __init__(self, num_layers, learning_rate, criterion, kernel_size, seq_len, dropout, hidden_size, model):
         super(DNN_clf, self).__init__()
-        self.batch_size = batch_size
         self.criterion = criterion
         self.learning_rate = learning_rate
+        self.model = model
 
-        all_layers = []
-        in_channels = 1
-        out_channels = 2
-        for i in range(num_layers):
-            all_layers.append(nn.Conv1d(in_channels, out_channels, kernel_size=11))
-            all_layers.append(nn.ReLU())
-            all_layers.append(nn.BatchNorm2d(out_channels))
-            all_layers.append(nn.MaxPool1d(5))
-
-            in_channels = out_channels
-            out_channels = in_channels * 2
-        self.cnn_part = nn.Sequential(*all_layers)
-
-        clf = [nn.Flatten(), nn.Linear(1152, CLASSES), nn.Softmax()]
-        self.clf = nn.Sequential(*clf)
+        if model == 'cnn_1d':
+            self.cnn_part, self.maxpool_cnn, self.clf = get_cnn(num_layers, kernel_size, dropout, seq_len, hidden_size)
+        elif model == 'cnn_2d':
+            self.train_transform, self.val_transform = get_mel_transform(add_augmentation=False)
+            self.clf = CNN14(num_classes=NB_CLASSES, do_dropout=False, embed_only=False, device="cuda")
+        else:
+            raise WrongParameter('model must be in {cnn_1d, cnn_2d}')
 
     def forward(self, x):
-        cnn_feat = self.cnn_part(x)
+        if self.model == 'cnn_1d':
+            cnn_feat = self.cnn_part(x)
+            cnn_feat = cnn_feat.permute(0, 2, 1)
+            cnn_feat = self.maxpool_cnn(cnn_feat)
 
-        y_pred = self.clf(cnn_feat)
+            y_pred = self.clf(cnn_feat)
+        elif self.model == 'cnn_2d':
+            y_pred = self.clf(x)
+        else:
+            raise WrongParameter('model must be in {cnn_1d, cnn_2d}')
+
         return y_pred
 
     def configure_optimizers(self):
@@ -57,59 +48,91 @@ class DNN_clf(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):
         x, y = batch
+
+        x = self.train_transform(x)
         y_hat = self(x)
-        loss = self.criterion(y_hat, y)
-        result = pl.TrainResult(loss)
-        result.log('train_loss', loss)
-        return result
+
+        loss = self.get_loss(y_hat, y)
+        f1 = self.get_metrics(y_hat, y)
+
+        self.log('train_loss', loss, on_step=True, on_epoch=True, logger=True)
+        self.log('train_f1', f1, on_step=True, on_epoch=True, logger=True)
+
+        return loss
 
     def validation_step(self, batch, batch_idx):
         x, y = batch
+
+        x = self.val_transform(x)
         y_hat = self(x)
-        loss = self.criterion(y_hat, y)
-        result = pl.EvalResult(checkpoint_on=loss)
-        result.log('val_loss', loss)
-        return result
+
+        loss = self.get_loss(y_hat, y)
+        f1 = self.get_metrics(y_hat, y)
+
+        self.log('val_loss', loss, on_step=True, on_epoch=True, logger=True)
+        self.log('val_f1', f1, on_step=True, on_epoch=True, logger=True)
+
+        return loss
 
     def test_step(self, batch, batch_idx):
         x, y = batch
+
+        x = self.val_transform(x)
         y_hat = self(x)
-        loss = self.criterion(y_hat, y)
-        result = pl.EvalResult()
-        result.log('test_loss', loss)
-        return result
+
+        loss = self.get_loss(y_hat, y)
+        f1 = self.get_metrics(y_hat, y)
+
+        self.log('test_loss', loss, on_step=True, on_epoch=True, logger=True)
+        self.log('test_f1', f1, on_step=True, on_epoch=True, logger=True)
+
+        return loss
+
+    def get_loss(self, y_hat, y):
+        _, targets = y.max(dim=1)
+        loss = self.criterion(y_hat, targets)
+        return loss
+
+    @staticmethod
+    def get_metrics(y_hat, y):
+        y_classes = y.cpu().argmax(1)
+        y_hat_classes = y_hat.cpu().argmax(1)
+        f1 = f1_score(y_hat_classes, y_classes, average='weighted')
+
+        return f1
 
 
-def main():
+def main(short_sample):
     p = dict(
         seq_len=int(0.75e6),
         batch_size=16,
-        criterion=nn.MSELoss(),
-        max_epochs=10,
-        n_features=1,
-        hidden_size=100,
-        num_layers=1,
+        criterion=nn.CrossEntropyLoss(),
+        max_epochs=100,
+        num_layers=5,
         dropout=0.2,
         learning_rate=0.001,
+        kernel_size=7,
+        hidden_size=16,
+        model='cnn_2d'      # cnn_2d / cnn_1d
     )
 
     seed_everything(1)
+    csv_logger = CSVLogger('log', name='lstm', version='0')
 
-    csv_logger = CSVLogger('', name='lstm', version='0')
+    early_stop_callback = EarlyStopping(monitor="val_loss", min_delta=0.00, patience=10, verbose=False, mode="min")
+    trainer = Trainer(max_epochs=p['max_epochs'], logger=csv_logger, callbacks=[early_stop_callback],
+                      check_val_every_n_epoch=1, gpus=1)
 
-    trainer = Trainer(max_epochs=p['max_epochs'], logger=csv_logger)
+    model = DNN_clf(criterion=p['criterion'], num_layers=p['num_layers'], learning_rate=p['learning_rate'],
+                    seq_len=p['seq_len'], kernel_size=p['kernel_size'], dropout=p['dropout'],
+                    hidden_size=p['hidden_size'], model=p['model'])
 
-    model = DNN_clf(
-        batch_size=p['batch_size'],
-        criterion=p['criterion'],
-        num_layers=p['num_layers'],
-        learning_rate=p['learning_rate']
-    )
-
-    data_module = DataModule(seq_len=p['seq_len'])
+    data_module = DataModule(short_sample=short_sample, seq_len=p['seq_len'], batch_size=p['batch_size'],
+                             model=p['model'])
 
     trainer.fit(model, data_module)
     trainer.test(model, datamodule=data_module)
 
 
-main()
+# TODO: Pre-processing
+main(short_sample=False)

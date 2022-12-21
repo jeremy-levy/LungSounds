@@ -134,5 +134,5 @@ def main(short_sample):
     trainer.test(model, datamodule=data_module)
 
 
-# TODO: Pre-processing
+# TODO: Pre-processing, add more metrics with y_pred
 main(short_sample=False)

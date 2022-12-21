@@ -38,7 +38,7 @@ class DataModule(pl.LightningDataModule):
     def __init__(self, short_sample, seq_len, batch_size, model, num_workers=5):
         super().__init__()
         self.kaggle_path = '/home/jeremy/dataset_lung_sounds/kaggle/'
-        self.labels_keep = ['COPD', 'Asthma', 'Bronchiectasis', 'Bronchiolitis', 'Healthy', 'LRTI', 'Pneumonia', 'URTI',
+        self.labels_keep = ['COPD', 'Asthma', 'Bronchiectasis', 'Bronchiolitis', 'Healthy', 'Pneumonia', 'URTI',
                             'Lung Fibrosis',  'Heart Failure']
 
         self.short_sample = short_sample

@@ -60,11 +60,11 @@ class DataModule(pl.LightningDataModule):
     def prepare_data(self):
         pass
 
-    def parse_one_database(self, data_path):
+    def parse_one_database(self, data_path, desc):
         X, y = [], []
         labels_csv = pd.read_csv(os.path.join(data_path, 'labels.csv')).rename(columns={'id': 'ID'})
 
-        for i, rec in enumerate(tqdm(os.listdir(os.path.join(data_path, 'recordings_np')))):
+        for i, rec in enumerate(tqdm(os.listdir(os.path.join(data_path, 'recordings_np')), desc=desc)):
             # signal, fs = librosa.load(os.path.join(data_path, 'recordings', rec))
             signal = np.load(os.path.join(data_path, 'recordings_np', rec))
             id_curr = int(rec.split('_')[0])
@@ -79,7 +79,7 @@ class DataModule(pl.LightningDataModule):
                 X.append(signal)
                 y.append(label)
 
-            if (self.short_sample is True) and (i == 50):
+            if (self.short_sample is True) and (i >= 30):
                 break
 
         X = np.array(X)
@@ -88,16 +88,15 @@ class DataModule(pl.LightningDataModule):
 
     def setup(self, stage=None):
         if stage == TrainerFn.FITTING:
-            X_kaggle, y_kaggle = self.parse_one_database(self.kaggle_path)
-            X_rambam, y_rambam = self.parse_one_database(self.rambam_path)
-            X_kauh, y_kauh = self.parse_one_database(self.kauh_path)
+            X_kaggle, y_kaggle = self.parse_one_database(self.kaggle_path, desc='ICBHI')
+            X_rambam, y_rambam = self.parse_one_database(self.rambam_path, desc='Rambam')
+            X_kauh, y_kauh = self.parse_one_database(self.kauh_path, desc='KAUH')
 
             X = np.concatenate((X_kaggle, X_rambam, X_kauh))
             y = np.concatenate((y_kaggle, y_rambam, y_kauh))
 
             self.le.fit(y)
             y = self.le.transform(y)
-            print(np.unique(y.toarray()))
 
             self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(X, y, test_size=0.2,
                                                                                     random_state=42)

@@ -1,6 +1,7 @@
 import os
 import warnings
 from sklearn.exceptions import UndefinedMetricWarning
+import numpy as np
 
 import pytorch_lightning as pl
 import torch
@@ -16,7 +17,7 @@ from CNN import CNN14, get_mel_transform
 from Classic_CNN import get_cnn
 from Constants import NB_CLASSES
 from DataLoader import DataModule
-from utils import WrongParameter, save_dict
+from utils import WrongParameter, save_dict, get_metrics_per_pathology
 
 
 class DNN_clf(pl.LightningModule):
@@ -89,7 +90,7 @@ class DNN_clf(pl.LightningModule):
         print('y_hat', y_hat.shape)
 
         loss = self.get_loss(y_hat, y)
-        f1, acc, precision, recall = self.get_metrics(y_hat, y, per_class_metrics=True)
+        f1, acc, precision, recall = self.get_metrics(y_hat, y, per_class_metrics=True, batch_idx=batch_idx)
 
         self.log('test_loss', loss, on_step=True, on_epoch=True, logger=True)
         self.log('test_f1', f1, on_step=True, on_epoch=True, logger=True)
@@ -105,7 +106,7 @@ class DNN_clf(pl.LightningModule):
         return loss
 
     @staticmethod
-    def get_metrics(y_hat, y, per_class_metrics=False):
+    def get_metrics(y_hat, y, per_class_metrics=False, batch_idx=None):
         y_classes = y.cpu().argmax(1)
         y_hat_classes = y_hat.cpu().argmax(1)
 
@@ -115,8 +116,8 @@ class DNN_clf(pl.LightningModule):
         recall = recall_score(y_hat_classes, y_classes, average='weighted')
 
         if per_class_metrics is True:
-            results = classification_report(y_classes, y_hat_classes, output_dict=True)
-            save_dict(results, os.path.join('data_csv', 'per_class_metrics.csv'))
+            np.save(os.path.join('predictions', 'y_pred_' + str(batch_idx) + '.npy'), y_hat_classes)
+            np.save(os.path.join('predictions', 'y_test_' + str(batch_idx) + '.npy'), y_classes)
 
         return f1, acc, precision, recall
 
@@ -160,10 +161,11 @@ def main(short_sample):
 
     trainer.fit(model, data_module)
     results = trainer.test(model, datamodule=data_module, ckpt_path='best')[0]
+    get_metrics_per_pathology(data_module.le)
 
     params = {**p, **results}
     save_dict(params, os.path.join('data_csv', 'results.csv'))
 
 
-# TODO: Pre-processing, Move wav to np format, metric per pathology
-main(short_sample=True)
+# TODO: Pre-processing
+main(short_sample=False)

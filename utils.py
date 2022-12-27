@@ -37,7 +37,7 @@ def get_metrics_per_pathology(scaler, add_str=''):
 
     results = classification_report(y_test, y_pred, output_dict=True)
 
-    precision_all, recall_all, f1_all, name_path = [], [], [], []
+    precision_all, recall_all, f1_all, support_all, name_path = [], [], [], [], []
     pathologies = np.unique(y_test)
     for path in pathologies:
         results_path = results[str(path)]
@@ -45,6 +45,7 @@ def get_metrics_per_pathology(scaler, add_str=''):
         precision_all.append(results_path['precision'])
         recall_all.append(results_path['recall'])
         f1_all.append(results_path['f1-score'])
+        support_all.append(results_path['support'])
         name_path.append(scaler.categories_[0][path])
 
     res = pd.DataFrame({
@@ -52,6 +53,7 @@ def get_metrics_per_pathology(scaler, add_str=''):
         'precision': precision_all,
         'recall': recall_all,
         'f1': f1_all,
+        'support': support_all
     })
     res.to_csv(os.path.join('data_csv', 'results_per_path_' + add_str + '.csv'), index=False)
 

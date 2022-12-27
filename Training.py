@@ -87,7 +87,6 @@ class DNN_clf(pl.LightningModule):
 
         x = self.val_transform(x)
         y_hat = self(x)
-        print('y_hat', y_hat.shape)
 
         loss = self.get_loss(y_hat, y)
         f1, acc, precision, recall = self.get_metrics(y_hat, y, per_class_metrics=True, batch_idx=batch_idx)
@@ -122,7 +121,7 @@ class DNN_clf(pl.LightningModule):
         return f1, acc, precision, recall
 
 
-def main(short_sample):
+def main(short_sample, seq_len):
     warnings.filterwarnings(action='ignore', category=UndefinedMetricWarning)
 
     if short_sample is True:
@@ -133,7 +132,7 @@ def main(short_sample):
         batch_size = 16
 
     p = dict(
-        seq_len=int(0.75e6),
+        seq_len=seq_len,
         batch_size=batch_size,
         criterion=nn.CrossEntropyLoss(),
         max_epochs=nb_epochs,
@@ -156,8 +155,7 @@ def main(short_sample):
                     seq_len=p['seq_len'], kernel_size=p['kernel_size'], dropout=p['dropout'],
                     hidden_size=p['hidden_size'], model=p['model'])
 
-    data_module = DataModule(short_sample=short_sample, seq_len=p['seq_len'], batch_size=p['batch_size'],
-                             model=p['model'])
+    data_module = DataModule(short_sample=short_sample, seq_len=p['seq_len'], batch_size=p['batch_size'])
 
     trainer.fit(model, data_module)
     results = trainer.test(model, datamodule=data_module, ckpt_path='best')[0]
@@ -167,5 +165,8 @@ def main(short_sample):
     save_dict(params, os.path.join('data_csv', 'results.csv'))
 
 
-# TODO: Pre-processing
-main(short_sample=False)
+# TODO: Pre-processing, adding regularization, checker distribution pathologies train/test
+if __name__ == '__main__':
+    seq_len_it = [int(0.25e6), int(0.35e6), int(0.50e6), int(0.65e6), int(0.75e6)]
+    for seq_len in seq_len_it:
+        main(short_sample=False, seq_len=seq_len)

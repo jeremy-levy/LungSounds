@@ -1,21 +1,18 @@
-from abc import ABC
-
-import librosa
-import pandas as pd
 import os
-import numpy as np
-from tqdm import tqdm
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import LabelEncoder, OneHotEncoder
-import scipy
 
+import numpy as np
+import pandas as pd
+import pytorch_lightning as pl
+import scipy
 # Neural Networks
 import torch
-from torch.utils.data import Dataset, DataLoader
-import pytorch_lightning as pl
 from pytorch_lightning.trainer.states import TrainerFn
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import OneHotEncoder
+from torch.utils.data import Dataset, DataLoader
+from tqdm import tqdm
 
-from Constants import labels_keep
+from Constants import labels_keep, kaggle_path, rambam_path, kauh_path
 
 
 class TimeseriesDataset(Dataset):
@@ -25,7 +22,6 @@ class TimeseriesDataset(Dataset):
       into sequence data using rolling window.
     DataLoader using this dataset will output batches
       of `(batch_size, seq_len, n_features)` shape.
-    Suitable as an input to RNNs.
     """
     def __init__(self, X: np.ndarray, y: scipy.sparse.csr.csr_matrix):
         self.X = torch.tensor(X).float()
@@ -39,17 +35,12 @@ class TimeseriesDataset(Dataset):
 
 
 class DataModule(pl.LightningDataModule):
-    def __init__(self, short_sample, seq_len, batch_size, model, num_workers=5):
+    def __init__(self, short_sample, seq_len, batch_size, num_workers=5):
         super().__init__()
-        self.kaggle_path = '/home/jeremy/dataset_lung_sounds/kaggle/'
-        self.rambam_path = '/home/jeremy/dataset_lung_sounds/rambam/'
-        self.kauh_path = '/home/jeremy/dataset_lung_sounds/KAUH/'
-
         self.short_sample = short_sample
         self.seq_len = seq_len
         self.batch_size = batch_size
         self.num_workers = num_workers
-        self.model = model
 
         self.le = OneHotEncoder()
 
@@ -88,9 +79,9 @@ class DataModule(pl.LightningDataModule):
 
     def setup(self, stage=None):
         if stage == TrainerFn.FITTING:
-            X_kaggle, y_kaggle = self.parse_one_database(self.kaggle_path, desc='ICBHI')
-            X_rambam, y_rambam = self.parse_one_database(self.rambam_path, desc='Rambam')
-            X_kauh, y_kauh = self.parse_one_database(self.kauh_path, desc='KAUH')
+            X_kaggle, y_kaggle = self.parse_one_database(kaggle_path, desc='ICBHI')
+            X_rambam, y_rambam = self.parse_one_database(rambam_path, desc='Rambam')
+            X_kauh, y_kauh = self.parse_one_database(kauh_path, desc='KAUH')
 
             X = np.concatenate((X_kaggle, X_rambam, X_kauh))
             y = np.concatenate((y_kaggle, y_rambam, y_kauh))
@@ -128,3 +119,16 @@ class DataModule(pl.LightningDataModule):
 
     def predict_dataloader(self):
         return self.test_dataloader()
+
+
+if __name__ == '__main__':
+    datamodule = DataModule(short_sample=False, seq_len=int(0.75e6), batch_size=16)
+    datamodule.setup(stage=TrainerFn.FITTING)
+
+    y_train = np.argmax(datamodule.y_train.toarray(), axis=1)
+    unique, counts = np.unique(y_train, return_counts=True)
+    print(dict(zip(unique, counts)))
+
+    y_test = np.argmax(datamodule.y_test.toarray(), axis=1)
+    unique, counts = np.unique(y_test, return_counts=True)
+    print(dict(zip(unique, counts)))

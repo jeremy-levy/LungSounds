@@ -21,17 +21,18 @@ from utils import WrongParameter, save_dict, get_metrics_per_pathology
 
 
 class DNN_clf(pl.LightningModule):
-    def __init__(self, num_layers, learning_rate, criterion, kernel_size, seq_len, dropout, hidden_size, model):
+    def __init__(self, num_layers, learning_rate, criterion, kernel_size, seq_len, dropout, hidden_size, model, device):
         super(DNN_clf, self).__init__()
         self.criterion = criterion
         self.learning_rate = learning_rate
         self.model = model
+        self.device_ = device
 
         if model == 'cnn_1d':
             self.cnn_part, self.maxpool_cnn, self.clf = get_cnn(num_layers, kernel_size, dropout, seq_len, hidden_size)
         elif model == 'cnn_2d':
             self.train_transform, self.val_transform = get_mel_transform(add_augmentation=False)
-            self.clf = CNN14(num_classes=NB_CLASSES, do_dropout=False, embed_only=False, device="cuda")
+            self.clf = CNN14(num_classes=NB_CLASSES, do_dropout=False, embed_only=False, device=self.device_)
         else:
             raise WrongParameter('model must be in {cnn_1d, cnn_2d}')
 
@@ -146,14 +147,13 @@ def main(short_sample, seq_len):
 
     seed_everything(1)
     csv_logger = CSVLogger('log', name='lstm', version='0')
-
     early_stop_callback = EarlyStopping(monitor="val_loss", min_delta=0.00, patience=10, verbose=False, mode="min")
     trainer = Trainer(max_epochs=p['max_epochs'], logger=csv_logger, callbacks=[early_stop_callback],
-                      check_val_every_n_epoch=1, gpus=1)
+                      check_val_every_n_epoch=1, devices=[2], accelerator='gpu')
 
     model = DNN_clf(criterion=p['criterion'], num_layers=p['num_layers'], learning_rate=p['learning_rate'],
                     seq_len=p['seq_len'], kernel_size=p['kernel_size'], dropout=p['dropout'],
-                    hidden_size=p['hidden_size'], model=p['model'])
+                    hidden_size=p['hidden_size'], model=p['model'], device='cuda:2')
 
     data_module = DataModule(short_sample=short_sample, seq_len=p['seq_len'], batch_size=p['batch_size'])
 
@@ -165,8 +165,9 @@ def main(short_sample, seq_len):
     save_dict(params, os.path.join('data_csv', 'results.csv'))
 
 
-# TODO: Pre-processing, adding regularization, checker distribution pathologies train/test
+# TODO: Pre-processing, adding regularization
 if __name__ == '__main__':
-    seq_len_it = [int(0.25e6), int(0.35e6), int(0.50e6), int(0.65e6), int(0.75e6)]
+    seq_len_it = [int(0.50e6), int(0.65e6), int(0.75e6)]
     for seq_len in seq_len_it:
         main(short_sample=False, seq_len=seq_len)
+        torch.cuda.empty_cache()

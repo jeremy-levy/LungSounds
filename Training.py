@@ -21,12 +21,14 @@ from utils import WrongParameter, save_dict, get_metrics_per_pathology
 
 
 class DNN_clf(pl.LightningModule):
-    def __init__(self, num_layers, learning_rate, criterion, kernel_size, seq_len, dropout, hidden_size, model, device):
+    def __init__(self, num_layers, learning_rate, criterion, kernel_size, seq_len, dropout, hidden_size, model, device,
+                 regularization):
         super(DNN_clf, self).__init__()
         self.criterion = criterion
         self.learning_rate = learning_rate
         self.model = model
         self.device_ = device
+        self.regularization = regularization
 
         if model == 'cnn_1d':
             self.cnn_part, self.maxpool_cnn, self.clf = get_cnn(num_layers, kernel_size, dropout, seq_len, hidden_size)
@@ -51,7 +53,9 @@ class DNN_clf(pl.LightningModule):
         return y_pred
 
     def configure_optimizers(self):
-        return torch.optim.Adam(self.parameters(), lr=self.learning_rate)
+        if self.regularization == 0:
+            return torch.optim.Adam(self.parameters(), lr=self.learning_rate)
+        return torch.optim.Adam(self.parameters(), lr=self.learning_rate, weight_decay=self.regularization)
 
     def training_step(self, batch, batch_idx):
         x, y = batch
@@ -122,7 +126,7 @@ class DNN_clf(pl.LightningModule):
         return f1, acc, precision, recall
 
 
-def main(short_sample, seq_len):
+def main(short_sample, regularization):
     warnings.filterwarnings(action='ignore', category=UndefinedMetricWarning)
 
     if short_sample is True:
@@ -133,7 +137,7 @@ def main(short_sample, seq_len):
         batch_size = 16
 
     p = dict(
-        seq_len=seq_len,
+        seq_len=int(0.35e6),
         batch_size=batch_size,
         criterion=nn.CrossEntropyLoss(),
         max_epochs=nb_epochs,
@@ -142,7 +146,8 @@ def main(short_sample, seq_len):
         learning_rate=0.001,
         kernel_size=7,
         hidden_size=16,
-        model='cnn_2d'      # cnn_2d / cnn_1d
+        model='cnn_2d',      # cnn_2d / cnn_1d
+        regularization=regularization
     )
 
     seed_everything(1)
@@ -153,7 +158,8 @@ def main(short_sample, seq_len):
 
     model = DNN_clf(criterion=p['criterion'], num_layers=p['num_layers'], learning_rate=p['learning_rate'],
                     seq_len=p['seq_len'], kernel_size=p['kernel_size'], dropout=p['dropout'],
-                    hidden_size=p['hidden_size'], model=p['model'], device='cuda:2')
+                    hidden_size=p['hidden_size'], model=p['model'], device='cuda:2',
+                    regularization=p['regularization'])
 
     data_module = DataModule(short_sample=short_sample, seq_len=p['seq_len'], batch_size=p['batch_size'])
 
@@ -165,9 +171,10 @@ def main(short_sample, seq_len):
     save_dict(params, os.path.join('data_csv', 'results.csv'))
 
 
-# TODO: Pre-processing, adding regularization
+# TODO: Pre-processing, add multi-label samples
 if __name__ == '__main__':
-    seq_len_it = [int(0.50e6), int(0.65e6), int(0.75e6)]
-    for seq_len in seq_len_it:
-        main(short_sample=False, seq_len=seq_len)
+    regularization_it = [0, 1e-7, 1e-6, 1e-5, 1e-4]
+
+    for regularization in regularization_it:
+        main(short_sample=False, regularization=regularization)
         torch.cuda.empty_cache()

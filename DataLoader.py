@@ -89,7 +89,7 @@ class DataModule(pl.LightningDataModule):
         X = np.array(X)
         y = np.array(y).reshape(-1, 1)
 
-        print(np.unique(unkeep_labels))
+        print('labels not used:', np.unique(unkeep_labels))
         return X, y
 
     def setup(self, stage=None):

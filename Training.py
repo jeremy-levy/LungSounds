@@ -138,9 +138,9 @@ def train(short_sample, p):
     else:
         class_weight = None
 
-    model = DNN_clf(learning_rate=p['learning_rate'], kernel_size=p['kernel_size'],
-                    regularization=p['regularization'], single_dataset=p['single_dataset'],
-                    add_augmentation=p['add_augmentation'], class_weight=class_weight, pool_type=p['pool_type'],)
+    model = DNN_clf(learning_rate=p['learning_rate'], kernel_size=p['kernel_size'], regularization=p['regularization'],
+                    single_dataset=p['single_dataset'], add_augmentation=p['add_augmentation'],
+                    class_weight=class_weight, pool_type=p['pool_type'])
 
     trainer.fit(model, data_module)
     results = trainer.test(model, datamodule=data_module, ckpt_path='best')[0]

@@ -1,12 +1,14 @@
 import torch.nn as nn
 
-from Constants import NB_CLASSES
+from Constants import get_nb_classes
 
 
-def get_cnn(num_layers, kernel_size, dropout, seq_len, hidden_size):
+def get_cnn(num_layers, kernel_size, dropout, seq_len, hidden_size, single_dataset):
     all_layers = []
     in_channels = 1
     out_channels = 2
+    NB_CLASSES = get_nb_classes(single_dataset)
+
     for i in range(num_layers):
         all_layers.append(nn.Conv1d(in_channels, out_channels, kernel_size=kernel_size,
                                     padding=int((kernel_size - 1) / 2)))

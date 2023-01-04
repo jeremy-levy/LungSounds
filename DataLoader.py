@@ -9,10 +9,12 @@ import torch
 from pytorch_lightning.trainer.states import TrainerFn
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import OneHotEncoder
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, WeightedRandomSampler
 from tqdm import tqdm
+from scipy.signal import savgol_filter
 
-from Constants import labels_keep, kaggle_path, rambam_path, kauh_path
+from Constants import kaggle_path, rambam_path, kauh_path, get_labels_keep
+from utils import get_class_weight
 
 
 class TimeseriesDataset(Dataset):
@@ -35,18 +37,23 @@ class TimeseriesDataset(Dataset):
 
 
 class DataModule(pl.LightningDataModule):
-    def __init__(self, short_sample, seq_len, batch_size, num_workers=5):
+    def __init__(self, short_sample, seq_len, batch_size, savgol_filter_add, num_workers=5, single_dataset=False, add_sample=False):
         super().__init__()
         self.short_sample = short_sample
         self.seq_len = seq_len
         self.batch_size = batch_size
         self.num_workers = num_workers
+        self.single_dataset = single_dataset
+        self.labels_keep = get_labels_keep(single_dataset)
+        self.add_sample = add_sample
+        self.savgol_filter_add = savgol_filter_add
 
         self.le = OneHotEncoder()
 
         self.X_train, self.y_train = None, None
         self.X_val, self.y_val = None, None
         self.X_test, self.y_test = None, None
+        self.class_weight = None
 
     def prepare_data(self):
         pass
@@ -54,10 +61,14 @@ class DataModule(pl.LightningDataModule):
     def parse_one_database(self, data_path, desc):
         X, y = [], []
         labels_csv = pd.read_csv(os.path.join(data_path, 'labels.csv')).rename(columns={'id': 'ID'})
+        unkeep_labels = []
 
         for i, rec in enumerate(tqdm(os.listdir(os.path.join(data_path, 'recordings_np')), desc=desc)):
             # signal, fs = librosa.load(os.path.join(data_path, 'recordings', rec))
             signal = np.load(os.path.join(data_path, 'recordings_np', rec))
+            if self.savgol_filter_add is True:
+                signal = savgol_filter(signal, window_length=11, polyorder=3)
+
             id_curr = int(rec.split('_')[0])
 
             if signal.shape[0] > self.seq_len:
@@ -66,41 +77,52 @@ class DataModule(pl.LightningDataModule):
                 signal = np.pad(signal.flatten(), (0, int(self.seq_len - len(signal))), constant_values=0)
 
             label = labels_csv.loc[labels_csv.ID == id_curr].label.values[0]
-            if label in labels_keep:
+            if label in self.labels_keep:
                 X.append(signal)
                 y.append(label)
+            else:
+                unkeep_labels.append(label)
 
             if (self.short_sample is True) and (i >= 30):
                 break
 
         X = np.array(X)
         y = np.array(y).reshape(-1, 1)
+
+        print(np.unique(unkeep_labels))
         return X, y
 
     def setup(self, stage=None):
         if stage == TrainerFn.FITTING:
-            X_kaggle, y_kaggle = self.parse_one_database(kaggle_path, desc='ICBHI')
-            X_rambam, y_rambam = self.parse_one_database(rambam_path, desc='Rambam')
-            X_kauh, y_kauh = self.parse_one_database(kauh_path, desc='KAUH')
+            if self.single_dataset is False:
+                X_kaggle, y_kaggle = self.parse_one_database(kaggle_path, desc='ICBHI')
+                X_rambam, y_rambam = self.parse_one_database(rambam_path, desc='Rambam')
+                X_kauh, y_kauh = self.parse_one_database(kauh_path, desc='KAUH')
 
-            X = np.concatenate((X_kaggle, X_rambam, X_kauh))
-            y = np.concatenate((y_kaggle, y_rambam, y_kauh))
+                X = np.concatenate((X_kaggle, X_rambam, X_kauh))
+                y = np.concatenate((y_kaggle, y_rambam, y_kauh))
+            else:
+                X, y = self.parse_one_database(kaggle_path, desc='ICBHI')
 
             self.le.fit(y)
             y = self.le.transform(y)
 
-            self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(X, y, test_size=0.2,
+            self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(X, y, test_size=0.1,
                                                                                     random_state=42)
             self.X_val = self.X_test
             self.y_val = self.y_test
 
-            print('X_train', self.X_train.shape)
-            print('X_test', self.X_test.shape)
+            self.class_weight = get_class_weight(self.y_train)
 
     def train_dataloader(self):
+        if self.add_sample is True:
+            sampler = WeightedRandomSampler(self.class_weight, len(self.class_weight))
+        else:
+            sampler = None
+
         train_dataset = TimeseriesDataset(self.X_train, self.y_train)
         train_loader = DataLoader(train_dataset, batch_size=self.batch_size, shuffle=False,
-                                  num_workers=self.num_workers)
+                                  num_workers=self.num_workers, sampler=sampler)
 
         return train_loader
 
@@ -122,13 +144,14 @@ class DataModule(pl.LightningDataModule):
 
 
 if __name__ == '__main__':
-    datamodule = DataModule(short_sample=False, seq_len=int(0.75e6), batch_size=16)
+    datamodule = DataModule(short_sample=False, seq_len=int(0.75e6), batch_size=16, single_dataset=False,
+                            savgol_filter_add=True)
     datamodule.setup(stage=TrainerFn.FITTING)
 
-    y_train = np.argmax(datamodule.y_train.toarray(), axis=1)
-    unique, counts = np.unique(y_train, return_counts=True)
-    print(dict(zip(unique, counts)))
-
-    y_test = np.argmax(datamodule.y_test.toarray(), axis=1)
-    unique, counts = np.unique(y_test, return_counts=True)
-    print(dict(zip(unique, counts)))
+    # y_train = np.argmax(datamodule.y_train.toarray(), axis=1)
+    # unique, counts = np.unique(y_train, return_counts=True)
+    # print(dict(zip(unique, counts)))
+    #
+    # y_test = np.argmax(datamodule.y_test.toarray(), axis=1)
+    # unique, counts = np.unique(y_test, return_counts=True)
+    # print(dict(zip(unique, counts)))

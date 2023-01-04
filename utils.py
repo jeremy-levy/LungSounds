@@ -4,6 +4,7 @@ import numpy as np
 import librosa
 from sklearn.metrics import classification_report
 from tqdm import tqdm
+import torch
 
 
 class WrongParameter(Exception):
@@ -56,6 +57,19 @@ def get_metrics_per_pathology(scaler, add_str=''):
         'support': support_all
     })
     res.to_csv(os.path.join('data_csv', 'results_per_path_' + add_str + '.csv'), index=False)
+
+
+def get_class_weight(y_train):
+    y_train = np.argmax(y_train.toarray(), axis=1)
+    class_weight = []
+    labels = np.unique(y_train)
+    for i in range(len(labels)):
+        num_label = y_train[y_train == i].shape[0]
+        weight_curr = 1 - (num_label / y_train.shape[0])
+        class_weight.append(weight_curr)
+
+    class_weight = torch.FloatTensor(class_weight)
+    return class_weight
 
 
 if __name__ == '__main__':

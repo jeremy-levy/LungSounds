@@ -25,17 +25,18 @@ from utils import WrongParameter, save_dict, get_metrics_per_pathology, get_clas
 
 
 class DNN_clf(pl.LightningModule):
-    def __init__(self, learning_rate, kernel_size, pool_type, regularization, single_dataset,
-                 add_augmentation, class_weight=None):
+    def __init__(self, learning_rate, kernel_size, pool_type, regularization, single_dataset, leaky,
+                 add_augmentation, out_channels, add_standardize, class_weight=None):
         super(DNN_clf, self).__init__()
         self.learning_rate = learning_rate
         self.regularization = regularization
         self.nb_classes = get_nb_classes(single_dataset=single_dataset)
         self.criterion = nn.CrossEntropyLoss(weight=class_weight)
 
-        self.train_transform, self.val_transform = get_mel_transform(add_augmentation=add_augmentation)
-        self.clf = CNN14(num_classes=self.nb_classes, do_dropout=True, embed_only=False,
-                         kernel_size=kernel_size, pool_type=pool_type)
+        self.train_transform, self.val_transform = get_mel_transform(add_augmentation=add_augmentation,
+                                                                     add_standardize=add_standardize)
+        self.clf = CNN14(num_classes=self.nb_classes, do_dropout=True, embed_only=False, out_channels=out_channels,
+                         kernel_size=kernel_size, pool_type=pool_type, leaky=leaky)
 
     def forward(self, x):
         y_pred = self.clf(x)
@@ -140,7 +141,8 @@ def train(short_sample, p):
 
     model = DNN_clf(learning_rate=p['learning_rate'], kernel_size=p['kernel_size'], regularization=p['regularization'],
                     single_dataset=p['single_dataset'], add_augmentation=p['add_augmentation'],
-                    class_weight=class_weight, pool_type=p['pool_type'])
+                    class_weight=class_weight, pool_type=p['pool_type'], leaky=p['leaky'],
+                    out_channels=p['out_channels'], add_standardize=p['add_standardize'])
 
     trainer.fit(model, data_module)
     results = trainer.test(model, datamodule=data_module, ckpt_path='best')[0]
@@ -148,7 +150,7 @@ def train(short_sample, p):
               'train_size': data_module.X_train.shape[0], 'test_size': data_module.X_test.shape[0]}
 
     save_dict(params, os.path.join('data_csv', 'results.csv'))
-    # get_metrics_per_pathology(data_module.le)
+    get_metrics_per_pathology(data_module.le, add_str=p['counter'])
 
     return params['test_f1_macro']
 
@@ -170,16 +172,23 @@ def optuna_optimization(short_sample, n_trials):
             'kernel_size': trial.suggest_int('kernel_size', 3, 11, step=2),
             'pool_type': trial.suggest_categorical('pool_type', ['avg', 'max', 'avg+max']),
             'regularization': trial.suggest_float('regularization', 0, 1e-4, step=5e-6),
-            'single_dataset': True,
+            'single_dataset': False,
             'add_augmentation': trial.suggest_categorical('add_augmentation', [True, False]),
             'add_sample': trial.suggest_categorical('add_sample', [True, False]),
             'add_class_weight': trial.suggest_categorical('add_class_weight', [True, False]),
             'savgol_filter_add': trial.suggest_categorical('savgol_filter_add', [True, False]),
+            'leaky': trial.suggest_categorical('leaky', [True, False]),
+            'counter': trial.number,
+            'out_channels': 2**trial.suggest_int('out_channels', 2, 6, step=1),
+            'add_standardize': trial.suggest_categorical('add_standardize', [True, False]),
         }
 
-        f1 = train(short_sample, p)
-        torch.cuda.empty_cache()
+        try:
+            f1 = train(short_sample, p)
+        except RuntimeError:
+            f1 = 0
 
+        torch.cuda.empty_cache()
         return f1
 
     study = optuna.create_study(direction='maximize')

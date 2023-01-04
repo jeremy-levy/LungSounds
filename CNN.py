@@ -19,12 +19,13 @@ def init_bn(bn):
 
 
 class ConvBlock(nn.Module):  # for CNN10 & CNN14
-    def __init__(self, in_channels, out_channels, kernel_size, do_dropout):
+    def __init__(self, in_channels, out_channels, kernel_size, do_dropout, leaky):
 
         super(ConvBlock, self).__init__()
 
         self.dropout = nn.Dropout(0.2)
         self.do_dropout = do_dropout
+        self.leaky = leaky
 
         self.conv1 = nn.Conv2d(in_channels=in_channels,
                                out_channels=out_channels,
@@ -49,8 +50,14 @@ class ConvBlock(nn.Module):  # for CNN10 & CNN14
 
     def forward(self, input, pool_size=(2, 2), pool_type='avg'):
         x = input
-        x = F.relu_(self.bn1(self.conv1(x)))
-        x = F.relu_(self.bn2(self.conv2(x)))
+
+        if self.leaky is True:
+            x = F.leaky_relu_(self.bn1(self.conv1(x)))
+            x = F.leaky_relu_(self.bn2(self.conv2(x)))
+        else:
+            x = F.relu_(self.bn1(self.conv1(x)))
+            x = F.relu_(self.bn2(self.conv2(x)))
+
         if pool_type == 'max':
             x = F.max_pool2d(x, kernel_size=pool_size)
         elif pool_type == 'avg':
@@ -68,20 +75,25 @@ class ConvBlock(nn.Module):  # for CNN10 & CNN14
 
 
 class CNN14(nn.Module):
-    def __init__(self, kernel_size, pool_type, num_classes=4, do_dropout=False, embed_only=False):
+    def __init__(self, kernel_size, pool_type, leaky, out_channels, num_classes=4, do_dropout=False, embed_only=False):
         super(CNN14, self).__init__()
 
         self.embed_only = embed_only
         self.pool_type = pool_type
-        self.conv_block1 = ConvBlock(in_channels=1, out_channels=64, kernel_size=kernel_size, do_dropout=do_dropout)
-        self.conv_block2 = ConvBlock(in_channels=64, out_channels=128, kernel_size=kernel_size, do_dropout=do_dropout)
-        self.conv_block3 = ConvBlock(in_channels=128, out_channels=256, kernel_size=kernel_size, do_dropout=do_dropout)
-        self.conv_block4 = ConvBlock(in_channels=256, out_channels=512, kernel_size=kernel_size, do_dropout=do_dropout)
-        self.conv_block5 = ConvBlock(in_channels=512, out_channels=1024, kernel_size=kernel_size, do_dropout=do_dropout)
-        self.conv_block6 = ConvBlock(in_channels=1024, out_channels=2048, kernel_size=kernel_size,
-                                     do_dropout=do_dropout)
+        self.conv_block1 = ConvBlock(in_channels=1, out_channels=2*out_channels, kernel_size=kernel_size,
+                                     do_dropout=do_dropout, leaky=leaky)
+        self.conv_block2 = ConvBlock(in_channels=2*out_channels, out_channels=4*out_channels, kernel_size=kernel_size,
+                                     do_dropout=do_dropout, leaky=leaky)
+        self.conv_block3 = ConvBlock(in_channels=4*out_channels, out_channels=8*out_channels, kernel_size=kernel_size,
+                                     do_dropout=do_dropout, leaky=leaky)
+        self.conv_block4 = ConvBlock(in_channels=8*out_channels, out_channels=16*out_channels, kernel_size=kernel_size,
+                                     do_dropout=do_dropout, leaky=leaky)
+        self.conv_block5 = ConvBlock(in_channels=16*out_channels, out_channels=32*out_channels, kernel_size=kernel_size,
+                                     do_dropout=do_dropout, leaky=leaky)
+        self.conv_block6 = ConvBlock(in_channels=32*out_channels, out_channels=64*out_channels, kernel_size=kernel_size,
+                                     do_dropout=do_dropout, leaky=leaky)
 
-        self.linear = nn.Linear(2048, num_classes, bias=True)
+        self.linear = nn.Linear(64*out_channels, num_classes, bias=True)
 
     def forward(self, x):
         x = self.conv_block1(x, pool_size=(2, 2), pool_type=self.pool_type)
@@ -143,19 +155,26 @@ class SpecAugment(torch.nn.Module):
             return audio
 
 
-def get_mel_transform(add_augmentation):
+def get_mel_transform(add_augmentation, add_standardize):
     melspec = T.MelSpectrogram(n_fft=1024, n_mels=64, win_length=1024, hop_length=512, f_min=50, f_max=2000)
     normalize = Normalize()
     melspec = torch.nn.Sequential(melspec, normalize)
-    # standardize = Standardize()
 
     # Data transformations
     specaug = SpecAugment(freq_mask=20, time_mask=40, freq_stripes=2, time_stripes=2)
-
-    val_transform = nn.Sequential(melspec)
-    if add_augmentation is True:
-        train_transform = nn.Sequential(melspec, specaug)
+    if add_standardize is False:
+        val_transform = nn.Sequential(melspec)
+        if add_augmentation is True:
+            train_transform = nn.Sequential(melspec, specaug)
+        else:
+            train_transform = nn.Sequential(melspec)
     else:
-        train_transform = nn.Sequential(melspec)
+        standardize = Standardize()
+
+        val_transform = nn.Sequential(melspec, standardize)
+        if add_augmentation is True:
+            train_transform = nn.Sequential(melspec, specaug, standardize)
+        else:
+            train_transform = nn.Sequential(melspec, standardize)
 
     return train_transform, val_transform

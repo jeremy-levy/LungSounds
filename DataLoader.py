@@ -107,8 +107,8 @@ class DataModule(pl.LightningDataModule):
             self.le.fit(y)
             y = self.le.transform(y)
 
-            self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(X, y, test_size=0.1,
-                                                                                    random_state=42)
+            self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(X, y, test_size=0.2,
+                                                                                    random_state=32)
             self.X_val = self.X_test
             self.y_val = self.y_test
 
@@ -151,7 +151,7 @@ if __name__ == '__main__':
     # y_train = np.argmax(datamodule.y_train.toarray(), axis=1)
     # unique, counts = np.unique(y_train, return_counts=True)
     # print(dict(zip(unique, counts)))
-    #
+
     # y_test = np.argmax(datamodule.y_test.toarray(), axis=1)
     # unique, counts = np.unique(y_test, return_counts=True)
     # print(dict(zip(unique, counts)))

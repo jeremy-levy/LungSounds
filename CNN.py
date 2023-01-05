@@ -155,8 +155,9 @@ class SpecAugment(torch.nn.Module):
             return audio
 
 
-def get_mel_transform(add_augmentation, add_standardize):
-    melspec = T.MelSpectrogram(n_fft=1024, n_mels=64, win_length=1024, hop_length=512, f_min=50, f_max=2000)
+def get_mel_transform(add_augmentation, add_standardize, n_fft, n_mels, win_length, hop_length, f_min, f_max):
+    melspec = T.MelSpectrogram(n_fft=n_fft, n_mels=n_mels, win_length=win_length, hop_length=hop_length, f_min=f_min,
+                               f_max=f_max)
     normalize = Normalize()
     melspec = torch.nn.Sequential(melspec, normalize)
 

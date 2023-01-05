@@ -77,6 +77,24 @@ class DataModule(pl.LightningDataModule):
                 signal = np.pad(signal.flatten(), (0, int(self.seq_len - len(signal))), constant_values=0)
 
             label = labels_csv.loc[labels_csv.ID == id_curr].label.values[0]
+
+            # Separate multiple labels
+            if '+' in label:
+                labels = label.split('+')
+                labels[1] = labels[1][1:]
+            elif 'with' in label:
+                labels = label.split('with')
+                labels[1] = labels[1][1:]
+            else:
+                labels = [label]
+
+            # Remove space at the end of the string
+            for idx_label in range(len(labels)):
+                if labels[idx_label][-1] == ' ':
+                    labels[idx_label] = labels[idx_label][0:-1]
+
+            # For now, taking first label only (no multi-label solution)
+            label = labels[0]
             if label in self.labels_keep:
                 X.append(signal)
                 y.append(label)

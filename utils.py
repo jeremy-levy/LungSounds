@@ -56,7 +56,7 @@ def get_metrics_per_pathology(scaler, add_str=''):
         'f1': f1_all,
         'support': support_all
     })
-    res.to_csv(os.path.join('data_csv', 'results_per_path_' + add_str + '.csv'), index=False)
+    res.to_csv(os.path.join('data_csv', 'results_per_path_' + str(add_str) + '.csv'), index=False)
 
 
 def get_class_weight(y_train):

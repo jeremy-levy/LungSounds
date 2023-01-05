@@ -19,22 +19,24 @@ from sklearn.metrics import f1_score, accuracy_score, precision_score, recall_sc
 
 from CNN import CNN14, get_mel_transform
 from Classic_CNN import get_cnn
-from Constants import get_nb_classes
+from Constants import get_nb_classes, current_best_p
 from DataLoader import DataModule
 from utils import WrongParameter, save_dict, get_metrics_per_pathology, get_class_weight
 
 
 class DNN_clf(pl.LightningModule):
     def __init__(self, learning_rate, kernel_size, pool_type, regularization, single_dataset, leaky,
-                 add_augmentation, out_channels, add_standardize, class_weight=None):
+                 add_augmentation, out_channels, add_standardize, n_fft, n_mels, win_length, hop_length, f_min, f_max,
+                 class_weight=None):
         super(DNN_clf, self).__init__()
         self.learning_rate = learning_rate
         self.regularization = regularization
         self.nb_classes = get_nb_classes(single_dataset=single_dataset)
         self.criterion = nn.CrossEntropyLoss(weight=class_weight)
 
-        self.train_transform, self.val_transform = get_mel_transform(add_augmentation=add_augmentation,
-                                                                     add_standardize=add_standardize)
+        self.train_transform, self.val_transform = get_mel_transform(
+            add_augmentation=add_augmentation, add_standardize=add_standardize, n_fft=n_fft, n_mels=n_mels,
+            win_length=win_length, hop_length=hop_length, f_min=f_min, f_max=f_max)
         self.clf = CNN14(num_classes=self.nb_classes, do_dropout=True, embed_only=False, out_channels=out_channels,
                          kernel_size=kernel_size, pool_type=pool_type, leaky=leaky)
 
@@ -142,7 +144,9 @@ def train(short_sample, p):
     model = DNN_clf(learning_rate=p['learning_rate'], kernel_size=p['kernel_size'], regularization=p['regularization'],
                     single_dataset=p['single_dataset'], add_augmentation=p['add_augmentation'],
                     class_weight=class_weight, pool_type=p['pool_type'], leaky=p['leaky'],
-                    out_channels=p['out_channels'], add_standardize=p['add_standardize'])
+                    out_channels=p['out_channels'], add_standardize=p['add_standardize'], n_fft=p['n_fft'],
+                    n_mels=p['n_mels'], win_length=p['win_length'], hop_length=p['hop_length'], f_min=p['f_min'],
+                    f_max=p['f_max'])
 
     trainer.fit(model, data_module)
     results = trainer.test(model, datamodule=data_module, ckpt_path='best')[0]
@@ -174,18 +178,26 @@ def optuna_optimization(short_sample, n_trials):
             'regularization': trial.suggest_float('regularization', 0, 1e-4, step=5e-6),
             'single_dataset': False,
             'add_augmentation': trial.suggest_categorical('add_augmentation', [True, False]),
-            'add_sample': trial.suggest_categorical('add_sample', [True, False]),
+            'add_sample': False,
             'add_class_weight': trial.suggest_categorical('add_class_weight', [True, False]),
             'savgol_filter_add': trial.suggest_categorical('savgol_filter_add', [True, False]),
             'leaky': trial.suggest_categorical('leaky', [True, False]),
             'counter': trial.number,
             'out_channels': 2**trial.suggest_int('out_channels', 2, 6, step=1),
             'add_standardize': trial.suggest_categorical('add_standardize', [True, False]),
+
+            'n_fft': 2**trial.suggest_int('n_fft', 9, 12, step=1),
+            'n_mels': 2**trial.suggest_int('n_mels', 4, 6, step=1),
+            'win_length': 2**trial.suggest_int('win_length', 9, 12, step=1),
+            'f_min': trial.suggest_int('f_min', 0, 100, step=10),
+            'f_max': trial.suggest_int('f_max', 18000, 25000, step=1000),
         }
+        p['hop_length'] = int(p['win_length']/2)
 
         try:
             f1 = train(short_sample, p)
         except RuntimeError:
+        # except KeyboardInterrupt:
             f1 = 0
 
         torch.cuda.empty_cache()
@@ -194,7 +206,15 @@ def optuna_optimization(short_sample, n_trials):
     study = optuna.create_study(direction='maximize')
     study.optimize(objective, n_trials=n_trials)
 
+    fig = optuna.visualization.plot_param_importances(study)
+    fig.write_image('optuna.png')
+
+
+def train_single(short_sample):
+    train(short_sample, current_best_p)
+
 
 # TODO: add multi-label samples
 if __name__ == '__main__':
-    optuna_optimization(short_sample=False, n_trials=5000)
+    optuna_optimization(short_sample=False, n_trials=99999)
+    # train_single(short_sample=False)

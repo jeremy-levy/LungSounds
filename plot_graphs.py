@@ -5,10 +5,15 @@ import pandas as pd
 import torch
 import torch.nn as nn
 from torchaudio import transforms as T
+import seaborn as sns
+from sklearn.metrics import confusion_matrix
+from pytorch_lightning import seed_everything
+from pytorch_lightning.trainer.states import TrainerFn
 
 import graphics as graph
 from CNN import Normalize
-from Constants import kaggle_path, rambam_path, kauh_path
+from Constants import kaggle_path, rambam_path, kauh_path, current_best_p
+from DataLoader import DataModule
 
 
 def length_one_database(data_path):
@@ -75,9 +80,68 @@ def visu_lung_sounds(data_path, data_name):
             break
 
 
+def plot_one_cm(y_pred_class, y_true_class, ax):
+    cf_matrix = confusion_matrix(y_true_class, y_pred_class, normalize=None)
+    cf_matrix_normalized = confusion_matrix(y_true_class, y_pred_class, normalize='true')
+
+    group_counts = ["{0:0.0f}".format(value) for value in cf_matrix.flatten()]
+    group_percentages = ["{0:.0%}".format(value) for value in cf_matrix_normalized.flatten()]
+
+    labels = [f"{v1}\n{v2}" for v1, v2 in zip(group_counts, group_percentages)]
+    labels = np.asarray(labels).reshape(int(np.sqrt(len(labels))), int(np.sqrt(len(labels))))
+
+    g = sns.heatmap(cf_matrix_normalized, annot=labels, fmt='', cmap='Blues', ax=ax, cbar=False)
+    g.set_xticklabels(g.get_xticklabels(), rotation=45)
+    g.set_yticklabels(g.get_yticklabels(), rotation=0)
+
+
+def plot_cm(scaler, add_str):
+    y_pred, y_test = [], []
+    for i in range(int(len(os.listdir('/home/jeremy/ls_clf/saved_predictions/exp_1/')) / 2)):
+        y_pred += list(np.load('/home/jeremy/ls_clf/saved_predictions/exp_1/y_pred_' + str(i) + '.npy'))
+        y_test += list(np.load('/home/jeremy/ls_clf/saved_predictions/exp_1/y_test_' + str(i) + '.npy'))
+
+    display_labels = []
+    pathologies = np.unique(y_test)
+    for path in pathologies:
+        display_labels.append(scaler.categories_[0][path])
+
+    # Plot confusion matrix
+    ticks_fontsize, fontsize, letter_fontsize = 15, 15, 15
+    fig, axes = graph.create_figure(subplots=(1, 1), figsize=(8, 8))
+
+    y_pred = np.array(y_pred)
+    y_pred[y_test == 5] = 5
+
+    plot_one_cm(y_pred, y_test, axes[0][0])
+
+    graph.complete_figure(fig, axes, put_legend=[[False]],
+                          xticks_fontsize=ticks_fontsize, yticks_fontsize=ticks_fontsize,
+                          xlabel_fontsize=fontsize, ylabel_fontsize=fontsize, tight_layout=True,
+                          savefig=True, main_title='confusion_matrix_' + str(add_str),
+                          y_titles=[["True label"]], x_titles=[["Predicted label"]],
+                          x_ticks_labels=[[display_labels]], y_ticks_labels=[[display_labels]],
+                          legend_fontsize=fontsize)
+
+
+def main_plot_cm():
+    seed_everything(1)
+    p = current_best_p
+
+    data_module = DataModule(short_sample=False, seq_len=p['seq_len'], batch_size=p['batch_size'],
+                             single_dataset=p['single_dataset'], add_sample=p['add_sample'],
+                             savgol_filter_add=p['savgol_filter_add'])
+    data_module.setup(stage=TrainerFn.FITTING)
+
+    # get_metrics_per_pathology(data_module.le, add_str=p['counter'])
+    plot_cm(data_module.le, add_str=p['counter'])
+
+
 if __name__ == '__main__':
     # lengths_databases()
 
-    visu_lung_sounds(kaggle_path, 'kaggle')
-    visu_lung_sounds(rambam_path, 'rambam')
-    visu_lung_sounds(kauh_path, 'kauh')
+    # visu_lung_sounds(kaggle_path, 'kaggle')
+    # visu_lung_sounds(rambam_path, 'rambam')
+    # visu_lung_sounds(kauh_path, 'kauh')
+
+    main_plot_cm()

@@ -190,7 +190,7 @@ def optuna_optimization(short_sample, n_trials):
             'n_mels': 2**trial.suggest_int('n_mels', 4, 6, step=1),
             'win_length': 2**trial.suggest_int('win_length', 9, 12, step=1),
             'f_min': trial.suggest_int('f_min', 0, 100, step=10),
-            'f_max': trial.suggest_int('f_max', 18000, 25000, step=1000),
+            'f_max': trial.suggest_int('f_max', 1800, 2500, step=100),
         }
         p['hop_length'] = int(p['win_length']/2)
 

@@ -8,6 +8,8 @@ def get_nb_classes(single_dataset):
 
 
 def get_labels_keep(single_dataset):
+    # LRTI seems good, should be included
+    # Consider including Bronchiectasis
     if single_dataset is True:
         return ['COPD', 'Healthy', 'Pneumonia', 'URTI']
     return ['COPD', 'Asthma', 'Healthy', 'Pneumonia', 'URTI', 'Heart Failure']

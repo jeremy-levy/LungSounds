@@ -166,10 +166,12 @@ if __name__ == '__main__':
                             savgol_filter_add=True)
     datamodule.setup(stage=TrainerFn.FITTING)
 
-    # y_train = np.argmax(datamodule.y_train.toarray(), axis=1)
-    # unique, counts = np.unique(y_train, return_counts=True)
-    # print(dict(zip(unique, counts)))
+    y_train = np.argmax(datamodule.y_train.toarray(), axis=1)
+    unique, counts = np.unique(y_train, return_counts=True)
+    print(dict(zip(unique, counts)))
 
-    # y_test = np.argmax(datamodule.y_test.toarray(), axis=1)
-    # unique, counts = np.unique(y_test, return_counts=True)
-    # print(dict(zip(unique, counts)))
+    y_test = np.argmax(datamodule.y_test.toarray(), axis=1)
+    unique, counts = np.unique(y_test, return_counts=True)
+    print(dict(zip(unique, counts)))
+
+    print(datamodule.le.categories_[0])

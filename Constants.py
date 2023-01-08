@@ -35,27 +35,29 @@ def get_labels_keep(single_dataset):
 #     }
 
 current_best_p = {
-    'seq_len': int(0.55e6),
+    'seq_len': int(0.20e6),
     'batch_size': 16,
     'max_epochs': 100,
     'learning_rate': 0.001,
-    'kernel_size': 7,
-    'pool_type': 'max',
+    'kernel_size': 3,
+    'pool_type': 'avg+max',
     'regularization': 0,
     'single_dataset': False,
-    'add_augmentation': True,
+    'add_augmentation': False,
     'add_sample': False,
     'add_class_weight': True,
     'savgol_filter_add': True,
     'leaky': True,
     'counter': 0,
-    'out_channels': 4,
+    'out_channels': 8,
     'add_standardize': True,
 
-    'n_fft': 2**11,
-    'n_mels': 2**4,
-    'win_length': 2**9,
-    'hop_length': 2**8,
+    'n_fft': 512,
+    'n_mels': 32,
+    'win_length': 512,
+    'hop_length': 256,
     'f_min': 20,
-    'f_max': 18000
+    'f_max': 2500,
+
+    'multi_label': True
     }

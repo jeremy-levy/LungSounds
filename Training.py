@@ -27,18 +27,23 @@ from utils import WrongParameter, save_dict, get_metrics_per_pathology, get_clas
 class DNN_clf(pl.LightningModule):
     def __init__(self, learning_rate, kernel_size, pool_type, regularization, single_dataset, leaky,
                  add_augmentation, out_channels, add_standardize, n_fft, n_mels, win_length, hop_length, f_min, f_max,
-                 class_weight=None):
+                 multi_label, class_weight=None):
         super(DNN_clf, self).__init__()
         self.learning_rate = learning_rate
         self.regularization = regularization
         self.nb_classes = get_nb_classes(single_dataset=single_dataset)
-        self.criterion = nn.CrossEntropyLoss(weight=class_weight)
+        self.multi_label = multi_label
+
+        if multi_label is True:
+            self.criterion = nn.BCELoss(weight=class_weight)
+        else:
+            self.criterion = nn.CrossEntropyLoss(weight=class_weight)
 
         self.train_transform, self.val_transform = get_mel_transform(
             add_augmentation=add_augmentation, add_standardize=add_standardize, n_fft=n_fft, n_mels=n_mels,
             win_length=win_length, hop_length=hop_length, f_min=f_min, f_max=f_max)
         self.clf = CNN14(num_classes=self.nb_classes, do_dropout=True, embed_only=False, out_channels=out_channels,
-                         kernel_size=kernel_size, pool_type=pool_type, leaky=leaky)
+                         kernel_size=kernel_size, pool_type=pool_type, leaky=leaky, multi_label=multi_label)
 
     def forward(self, x):
         y_pred = self.clf(x)
@@ -98,8 +103,11 @@ class DNN_clf(pl.LightningModule):
         return loss
 
     def get_loss(self, y_hat, y):
-        _, targets = y.max(dim=1)
-        loss = self.criterion(y_hat, targets)
+        if self.multi_label is False:
+            _, targets = y.max(dim=1)
+            loss = self.criterion(y_hat, targets)
+        else:
+            loss = self.criterion(y_hat, y)
         return loss
 
     @staticmethod
@@ -133,10 +141,10 @@ def train(short_sample, p):
 
     data_module = DataModule(short_sample=short_sample, seq_len=p['seq_len'], batch_size=p['batch_size'],
                              single_dataset=p['single_dataset'], add_sample=p['add_sample'],
-                             savgol_filter_add=p['savgol_filter_add'])
+                             savgol_filter_add=p['savgol_filter_add'], multi_label=p['multi_label'])
     data_module.setup(stage=TrainerFn.FITTING)
 
-    if p['add_class_weight'] is True:
+    if p['multi_label'] is False and p['add_class_weight'] is True:
         class_weight = data_module.class_weight
     else:
         class_weight = None
@@ -146,7 +154,7 @@ def train(short_sample, p):
                     class_weight=class_weight, pool_type=p['pool_type'], leaky=p['leaky'],
                     out_channels=p['out_channels'], add_standardize=p['add_standardize'], n_fft=p['n_fft'],
                     n_mels=p['n_mels'], win_length=p['win_length'], hop_length=p['hop_length'], f_min=p['f_min'],
-                    f_max=p['f_max'])
+                    f_max=p['f_max'], multi_label=p['multi_label'])
 
     trainer.fit(model, data_module)
     results = trainer.test(model, datamodule=data_module, ckpt_path='best')[0]
@@ -216,5 +224,5 @@ def train_single(short_sample):
 
 # TODO: add multi-label samples
 if __name__ == '__main__':
-    optuna_optimization(short_sample=False, n_trials=99999)
-    # train_single(short_sample=False)
+    # optuna_optimization(short_sample=False, n_trials=99999)
+    train_single(short_sample=False)

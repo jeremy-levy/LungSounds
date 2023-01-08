@@ -222,7 +222,7 @@ def train_single(short_sample):
     train(short_sample, current_best_p)
 
 
-# TODO: add multi-label samples
+# TODO: add multi-label metrics
 if __name__ == '__main__':
     # optuna_optimization(short_sample=False, n_trials=99999)
     train_single(short_sample=False)

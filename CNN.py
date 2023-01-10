@@ -75,14 +75,13 @@ class ConvBlock(nn.Module):  # for CNN10 & CNN14
 
 
 class CNN14(nn.Module):
-    def __init__(self, kernel_size, pool_type, leaky, out_channels, multi_label, num_classes=4, do_dropout=False,
+    def __init__(self, kernel_size, pool_type, leaky, out_channels, num_classes=4, do_dropout=False,
                  embed_only=False):
         super(CNN14, self).__init__()
 
         self.num_classes = num_classes
         self.embed_only = embed_only
         self.pool_type = pool_type
-        self.multi_label = multi_label
 
         self.conv_block1 = ConvBlock(in_channels=1, out_channels=2*out_channels, kernel_size=kernel_size,
                                      do_dropout=do_dropout, leaky=leaky)

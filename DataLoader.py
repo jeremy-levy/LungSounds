@@ -151,10 +151,8 @@ class DataModule(pl.LightningDataModule):
             self.le.fit(y)
             y = self.le.transform(y)
 
-            self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(X, y, test_size=0.2,
-                                                                                    random_state=32)
-            self.X_val = self.X_test
-            self.y_val = self.y_test
+            self.X_train, self.X_val, self.y_train, self.y_val = train_test_split(X, y, test_size=0.2, random_state=32)
+            self.X_test, self.y_test = X, y
 
             if self.multi_label is False:
                 self.class_weight = get_class_weight(self.y_train)
@@ -190,19 +188,22 @@ class DataModule(pl.LightningDataModule):
 
 # TODO: For now, class_weight does not work with multi_label
 if __name__ == '__main__':
+    multi_label = True
+
     datamodule = DataModule(short_sample=False, seq_len=int(0.75e6), batch_size=16, single_dataset=False,
-                            savgol_filter_add=True, multi_label=True)
+                            savgol_filter_add=True, multi_label=multi_label)
     datamodule.setup(stage=TrainerFn.FITTING)
 
-    print(datamodule.y_train.shape)
-    print(datamodule.y_train)
+    if multi_label is False:
+        y_train = np.argmax(datamodule.y_train.toarray(), axis=1)
+        unique, counts = np.unique(y_train, return_counts=True)
+        print(dict(zip(unique, counts)))
 
-    # y_train = np.argmax(datamodule.y_train.toarray(), axis=1)
-    # unique, counts = np.unique(y_train, return_counts=True)
-    # print(dict(zip(unique, counts)))
-    #
-    # y_test = np.argmax(datamodule.y_test.toarray(), axis=1)
-    # unique, counts = np.unique(y_test, return_counts=True)
-    # print(dict(zip(unique, counts)))
-    #
-    # print(datamodule.le.categories_[0])
+        y_test = np.argmax(datamodule.y_test.toarray(), axis=1)
+        unique, counts = np.unique(y_test, return_counts=True)
+        print(dict(zip(unique, counts)))
+    else:
+        for i in range(datamodule.y_train.shape[1]):
+            print(datamodule.le.classes_[i], 'train', np.sum(datamodule.y_train[:, i]), 'test',
+                  np.sum(datamodule.y_test[:, i]))
+

@@ -1,27 +1,25 @@
 import os
+import shutil
 import warnings
 
-from pytorch_lightning.trainer.states import TrainerFn
-from sklearn.exceptions import UndefinedMetricWarning
 import numpy as np
-
+import optuna
 import pytorch_lightning as pl
 import torch
 import torch.nn as nn
 from pytorch_lightning import Trainer, seed_everything
-from pytorch_lightning.loggers.csv_logs import CSVLogger
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
-import shutil
-import optuna
-
-from sklearn.metrics import classification_report
-from sklearn.metrics import f1_score, accuracy_score, precision_score, recall_score
+from pytorch_lightning.loggers.csv_logs import CSVLogger
+from pytorch_lightning.trainer.states import TrainerFn
+from sklearn.exceptions import UndefinedMetricWarning
+from sklearn.metrics import f1_score, accuracy_score, precision_score, recall_score, coverage_error, \
+    label_ranking_average_precision_score
+import joblib
 
 from CNN import CNN14, get_mel_transform
-from Classic_CNN import get_cnn
 from Constants import get_nb_classes, current_best_p
 from DataLoader import DataModule
-from utils import WrongParameter, save_dict, get_metrics_per_pathology, get_class_weight
+from utils import save_dict, get_all_metrics
 
 
 class DNN_clf(pl.LightningModule):
@@ -33,6 +31,7 @@ class DNN_clf(pl.LightningModule):
         self.regularization = regularization
         self.nb_classes = get_nb_classes(single_dataset=single_dataset)
         self.multi_label = multi_label
+        self.threshold_label = 0.5
 
         if multi_label is True:
             self.criterion = nn.BCELoss(weight=class_weight)
@@ -43,10 +42,13 @@ class DNN_clf(pl.LightningModule):
             add_augmentation=add_augmentation, add_standardize=add_standardize, n_fft=n_fft, n_mels=n_mels,
             win_length=win_length, hop_length=hop_length, f_min=f_min, f_max=f_max)
         self.clf = CNN14(num_classes=self.nb_classes, do_dropout=True, embed_only=False, out_channels=out_channels,
-                         kernel_size=kernel_size, pool_type=pool_type, leaky=leaky, multi_label=multi_label)
+                         kernel_size=kernel_size, pool_type=pool_type, leaky=leaky)
 
     def forward(self, x):
         y_pred = self.clf(x)
+
+        if self.multi_label is True:
+            y_pred = nn.Sigmoid()(y_pred)
         return y_pred
 
     def configure_optimizers(self):
@@ -61,11 +63,11 @@ class DNN_clf(pl.LightningModule):
         y_hat = self(x)
 
         loss = self.get_loss(y_hat, y)
-        f1_weighted, f1_macro, acc, precision, recall = self.get_metrics(y_hat, y)
+        metrics_dict = self.get_metrics(y_hat, y)
 
         self.log('train_loss', loss, on_step=True, on_epoch=True, logger=True)
-        self.log('train_f1_macro', f1_macro, on_step=True, on_epoch=True, logger=True)
-        self.log('train_acc', acc, on_step=True, on_epoch=True, logger=True)
+        self.log('train_f1_macro', metrics_dict['f1_macro'], on_step=True, on_epoch=True, logger=True)
+        self.log('train_acc', metrics_dict['acc'], on_step=True, on_epoch=True, logger=True)
 
         return loss
 
@@ -76,11 +78,11 @@ class DNN_clf(pl.LightningModule):
         y_hat = self(x)
 
         loss = self.get_loss(y_hat, y)
-        f1_weighted, f1_macro, acc, precision, recall = self.get_metrics(y_hat, y)
+        metrics_dict = self.get_metrics(y_hat, y)
 
         self.log('val_loss', loss, on_step=True, on_epoch=True, logger=True)
-        self.log('val_f1_macro', f1_macro, on_step=True, on_epoch=True, logger=True)
-        self.log('val_acc', acc, on_step=True, on_epoch=True, logger=True)
+        self.log('val_f1_macro', metrics_dict['f1_macro'], on_step=True, on_epoch=True, logger=True)
+        self.log('val_acc', metrics_dict['acc'], on_step=True, on_epoch=True, logger=True)
 
         return loss
 
@@ -91,14 +93,11 @@ class DNN_clf(pl.LightningModule):
         y_hat = self(x)
 
         loss = self.get_loss(y_hat, y)
-        f1_weighted, f1_macro, acc, precision, recall = self.get_metrics(y_hat, y, per_class_metrics=True, batch_idx=batch_idx)
+        metrics_dict = self.get_metrics(y_hat, y, per_class_metrics=True, batch_idx=batch_idx)
 
         self.log('test_loss', loss, on_step=True, on_epoch=True, logger=True)
-        self.log('test_f1_weighted', f1_weighted, on_step=True, on_epoch=True, logger=True)
-        self.log('test_f1_macro', f1_macro, on_step=True, on_epoch=True, logger=True)
-        self.log('test_acc', acc, on_step=True, on_epoch=True, logger=True)
-        self.log('test_precision', precision, on_step=True, on_epoch=True, logger=True)
-        self.log('test_recall', recall, on_step=True, on_epoch=True, logger=True)
+        for key in metrics_dict.keys():
+            self.log('test_' + key, metrics_dict[key], on_step=True, on_epoch=True, logger=True)
 
         return loss
 
@@ -110,41 +109,51 @@ class DNN_clf(pl.LightningModule):
             loss = self.criterion(y_hat, y)
         return loss
 
-    @staticmethod
-    def get_metrics(y_hat, y, per_class_metrics=False, batch_idx=None):
-        y_classes = y.cpu().argmax(1)
-        y_hat_classes = y_hat.cpu().argmax(1)
-
-        f1_weighted = f1_score(y_hat_classes, y_classes, average='weighted')
-        f1_macro = f1_score(y_hat_classes, y_classes, average='macro')
-        acc = accuracy_score(y_hat_classes, y_classes)
-        precision = precision_score(y_hat_classes, y_classes, average='weighted')
-        recall = recall_score(y_hat_classes, y_classes, average='weighted')
+    def get_metrics(self, y_hat, y, per_class_metrics=False, batch_idx=None):
+        if self.multi_label is False:
+            y_classes = y.cpu().argmax(1)
+            y_hat_classes = y_hat.cpu().argmax(1)
+        else:
+            y_hat_classes = y_hat.cpu().detach().numpy()
+            y_classes = y.cpu().detach().numpy()
 
         if per_class_metrics is True:
             np.save(os.path.join('predictions', 'y_pred_' + str(batch_idx) + '.npy'), y_hat_classes)
             np.save(os.path.join('predictions', 'y_test_' + str(batch_idx) + '.npy'), y_classes)
 
-        return f1_weighted, f1_macro, acc, precision, recall
+        if self.multi_label is True:
+            y_hat_classes[y_hat_classes < self.threshold_label] = 0
+            y_hat_classes[y_hat_classes >= self.threshold_label] = 1
+
+        metrics_dict = get_all_metrics(y_hat_classes, y_classes, multi_label=self.multi_label)
+        return metrics_dict
 
 
-def train(short_sample, p):
+def train(short_sample, p=current_best_p):
     warnings.filterwarnings(action='ignore', category=UndefinedMetricWarning)
     shutil.rmtree('/home/jeremy/ls_clf/predictions')
     os.makedirs('/home/jeremy/ls_clf/predictions', exist_ok=True)
-
     seed_everything(1)
+
+    if short_sample is True:
+        accelerator = 'cpu'
+        devices = 1
+    else:
+        accelerator = 'gpu'
+        devices = [2]
+
     csv_logger = CSVLogger('log', name='lstm', version='0')
     early_stop_callback = EarlyStopping(monitor="val_loss", min_delta=0.00, patience=10, verbose=False, mode="min")
     trainer = Trainer(max_epochs=p['max_epochs'], logger=csv_logger, callbacks=[early_stop_callback],
-                      check_val_every_n_epoch=1, devices=[2], accelerator='gpu')
+                      check_val_every_n_epoch=1, devices=devices, accelerator=accelerator, deterministic=True)
 
     data_module = DataModule(short_sample=short_sample, seq_len=p['seq_len'], batch_size=p['batch_size'],
                              single_dataset=p['single_dataset'], add_sample=p['add_sample'],
                              savgol_filter_add=p['savgol_filter_add'], multi_label=p['multi_label'])
     data_module.setup(stage=TrainerFn.FITTING)
+    joblib.dump(data_module.le, '/home/jeremy/ls_clf/predictions/scaler.joblib')
 
-    if p['multi_label'] is False and p['add_class_weight'] is True:
+    if (p['multi_label'] is False) and (p['add_class_weight'] is True):
         class_weight = data_module.class_weight
     else:
         class_weight = None
@@ -162,8 +171,6 @@ def train(short_sample, p):
               'train_size': data_module.X_train.shape[0], 'test_size': data_module.X_test.shape[0]}
 
     save_dict(params, os.path.join('data_csv', 'results.csv'))
-    get_metrics_per_pathology(data_module.le, add_str=p['counter'])
-
     return params['test_f1_macro']
 
 
@@ -209,6 +216,10 @@ def optuna_optimization(short_sample, n_trials):
             f1 = 0
 
         torch.cuda.empty_cache()
+
+        shutil.rmtree('/home/jeremy/ls_clf/log/')
+        shutil.rmtree('/home/jeremy/ls_clf/lightning_logs/')
+
         return f1
 
     study = optuna.create_study(direction='maximize')
@@ -218,11 +229,7 @@ def optuna_optimization(short_sample, n_trials):
     fig.write_image('optuna.png')
 
 
-def train_single(short_sample):
-    train(short_sample, current_best_p)
-
-
-# TODO: add multi-label metrics
+# TODO: threshold_label adapted
 if __name__ == '__main__':
     # optuna_optimization(short_sample=False, n_trials=99999)
-    train_single(short_sample=False)
+    train(short_sample=False)

@@ -8,11 +8,10 @@ def get_nb_classes(single_dataset):
 
 
 def get_labels_keep(single_dataset):
-    # LRTI seems good, should be included
     # Consider including Bronchiectasis
     if single_dataset is True:
         return ['COPD', 'Healthy', 'Pneumonia', 'URTI']
-    return ['COPD', 'Asthma', 'Healthy', 'Pneumonia', 'URTI', 'Heart Failure']
+    return ['COPD', 'Asthma', 'Healthy', 'Pneumonia', 'URTI', 'Heart Failure', 'Lung Fibrosis']
 
 
 current_best_p = {
@@ -22,23 +21,23 @@ current_best_p = {
     'learning_rate': 0.001,
     'kernel_size': 3,
     'pool_type': 'avg+max',
-    'regularization': 0,
+    'regularization': 0.000045,
     'single_dataset': False,
     'add_augmentation': False,
     'add_sample': False,
     'add_class_weight': True,
     'savgol_filter_add': True,
-    'leaky': True,
+    'leaky': False,
     'counter': 0,
     'out_channels': 8,
     'add_standardize': True,
 
-    'n_fft': 512,
-    'n_mels': 32,
+    'n_fft': 1024,
+    'n_mels': 64,
     'win_length': 512,
     'hop_length': 256,
-    'f_min': 20,
-    'f_max': 2500,
+    'f_min': 80,
+    'f_max': 2100,
 
     'multi_label': True
     }

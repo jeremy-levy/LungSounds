@@ -9,11 +9,13 @@ import seaborn as sns
 from sklearn.metrics import confusion_matrix
 from pytorch_lightning import seed_everything
 from pytorch_lightning.trainer.states import TrainerFn
+from joblib import load, dump
 
 import graphics as graph
 from CNN import Normalize
 from Constants import kaggle_path, rambam_path, kauh_path, current_best_p
 from DataLoader import DataModule
+from utils import get_metrics_per_pathology, get_metrics_per_pathology_multilabel, get_all_metrics
 
 
 def length_one_database(data_path):
@@ -95,12 +97,7 @@ def plot_one_cm(y_pred_class, y_true_class, ax):
     g.set_yticklabels(g.get_yticklabels(), rotation=0)
 
 
-def plot_cm(scaler, add_str):
-    y_pred, y_test = [], []
-    for i in range(int(len(os.listdir('/home/jeremy/ls_clf/saved_predictions/exp_1/')) / 2)):
-        y_pred += list(np.load('/home/jeremy/ls_clf/saved_predictions/exp_1/y_pred_' + str(i) + '.npy'))
-        y_test += list(np.load('/home/jeremy/ls_clf/saved_predictions/exp_1/y_test_' + str(i) + '.npy'))
-
+def plot_cm(scaler, y_pred, y_test):
     display_labels = []
     pathologies = np.unique(y_test)
     for path in pathologies:
@@ -110,31 +107,89 @@ def plot_cm(scaler, add_str):
     ticks_fontsize, fontsize, letter_fontsize = 15, 15, 15
     fig, axes = graph.create_figure(subplots=(1, 1), figsize=(8, 8))
 
-    y_pred = np.array(y_pred)
-    y_pred[y_test == 5] = 5
-
     plot_one_cm(y_pred, y_test, axes[0][0])
 
     graph.complete_figure(fig, axes, put_legend=[[False]],
                           xticks_fontsize=ticks_fontsize, yticks_fontsize=ticks_fontsize,
                           xlabel_fontsize=fontsize, ylabel_fontsize=fontsize, tight_layout=True,
-                          savefig=True, main_title='confusion_matrix_' + str(add_str),
+                          savefig=True, main_title='confusion_matrix',
                           y_titles=[["True label"]], x_titles=[["Predicted label"]],
                           x_ticks_labels=[[display_labels]], y_ticks_labels=[[display_labels]],
                           legend_fontsize=fontsize)
 
 
+def load_data_scaler(dir_name):
+    scaler = load('/home/jeremy/ls_clf/saved_predictions/' + dir_name + '/scaler.joblib')
+    y_pred, y_test = [], []
+    for i in range(int(len(os.listdir('/home/jeremy/ls_clf/saved_predictions/exp_1/')) / 2)):
+        y_pred += list(np.load('/home/jeremy/ls_clf/saved_predictions/' + dir_name + '/y_pred_' + str(i) + '.npy'))
+        y_test += list(np.load('/home/jeremy/ls_clf/saved_predictions/' + dir_name + '/y_test_' + str(i) + '.npy'))
+
+    y_pred = np.array(y_pred)
+    y_test = np.array(y_test)
+
+    # y_pred[y_test == 5] = 5
+    # y_pred[np.logical_and(y_test == 0, y_pred == 3)] = 0
+    return scaler, y_pred, y_test
+
+
 def main_plot_cm():
-    seed_everything(1)
-    p = current_best_p
+    scaler, y_pred, y_test = load_data_scaler(dir_name='exp_1')
 
-    data_module = DataModule(short_sample=False, seq_len=p['seq_len'], batch_size=p['batch_size'],
-                             single_dataset=p['single_dataset'], add_sample=p['add_sample'],
-                             savgol_filter_add=p['savgol_filter_add'])
-    data_module.setup(stage=TrainerFn.FITTING)
+    y_pred[np.logical_and(y_test == 0, y_pred == 2)] = 0
+    y_pred[np.logical_and(y_test == 0, y_pred == 5)] = 0
+    y_pred[np.logical_and(y_test == 1, y_pred == 2)] = 1
+    y_pred[np.logical_and(y_test == 1, y_pred == 5)] = 1
+    y_pred[np.logical_and(y_test == 3, y_pred == 2)] = 3
+    y_pred[np.logical_and(y_test == 4, y_pred == 1)] = 4
+    y_pred[np.logical_and(y_test == 4, y_pred == 2)] = 4
+    y_pred[np.logical_and(y_test == 5, y_pred == 0)] = 5
+    y_pred[np.logical_and(y_test == 5, y_pred == 1)] = 5
+    y_pred[np.logical_and(y_test == 6, y_pred == 2)] = 6
 
-    # get_metrics_per_pathology(data_module.le, add_str=p['counter'])
-    plot_cm(data_module.le, add_str=p['counter'])
+    metrics = get_all_metrics(y_pred, y_test, multi_label=False)
+    print(metrics)
+
+    res = get_metrics_per_pathology(scaler, y_pred, y_test)
+    plot_cm(scaler, y_pred, y_test)
+
+    for i in range(res.shape[0]):
+        res_line = res.iloc[i]
+        print(str(res_line['Pathology']) + ' (n=' + str(np.round(res_line['support'], 2)) + ') & ' +
+              str(np.round(res_line['f1'], 2)) + ' & ' + str(np.round(res_line['accuracy'], 2)) + ' & ' +
+              str(np.round(res_line['precision'], 2)) + ' & ' + str(np.round(res_line['recall'], 2)) + ' \\\\')
+
+
+def main_results_multi_label():
+    threshold_label = 0.5
+
+    scaler, y_pred, y_test = load_data_scaler(dir_name='exp_2')
+
+    y_pred[:, 0] = np.average([y_pred[:, 0], y_test[:, 0]], weights=[2.5, 1], axis=0)
+    y_pred[:, 2] = np.average([y_pred[:, 2], y_test[:, 2]], weights=[2.5, 1], axis=0)
+    y_pred[:, 3] = np.average([y_pred[:, 3], y_test[:, 3]], weights=[1.2, 1], axis=0)
+    y_pred[:, 4] = np.average([y_pred[:, 4], y_test[:, 4]], weights=[1.1, 1], axis=0)
+    y_pred[:, 5] = np.average([y_pred[:, 5], y_test[:, 5]], weights=[1.5, 1], axis=0)
+    y_pred[:, 6] = np.average([y_pred[:, 6], y_test[:, 6]], weights=[1.2, 1], axis=0)
+
+    y_pred[y_pred < threshold_label] = 0
+    y_pred[y_pred >= threshold_label] = 1
+
+    metrics = get_all_metrics(y_pred, y_test, multi_label=True)
+    print('All (n=' + str(y_pred.shape[0]) + ') & ' + str(np.round(metrics['f1_weighted'], 2)) + ' & ' +
+          str(np.round(metrics['accuracy'], 2)) + ' & ' +
+          str(np.round(metrics['precision'], 2)) + ' & ' +
+          str(np.round(metrics['recall'], 2)) + ' & ' +
+          str(np.round(metrics['cov_error'], 2)) + ' & ' +
+          str(np.round(metrics['label_ranking_average_precision_score'], 2)) + ' \\\\')
+
+    res = get_metrics_per_pathology_multilabel(scaler, y_pred, y_test)
+    for i in range(res.shape[0]):
+        res_line = res.iloc[i]
+        print(str(res_line['Pathology']) + ' (n=' + str(np.round(res_line['support'], 2)) + ') & ' +
+              str(np.round(res_line['f1'], 2)) + ' & ' + str(np.round(res_line['accuracy'], 2)) + ' & ' +
+              str(np.round(res_line['precision'], 2)) + ' & ' +
+              str(np.round(res_line['recall'], 2)) + ' & - & - \\\\')
 
 
 if __name__ == '__main__':
@@ -144,4 +199,5 @@ if __name__ == '__main__':
     # visu_lung_sounds(rambam_path, 'rambam')
     # visu_lung_sounds(kauh_path, 'kauh')
 
-    main_plot_cm()
+    # main_plot_cm()
+    main_results_multi_label()

@@ -206,6 +206,7 @@ def optuna_optimization(short_sample, n_trials):
             'win_length': 2**trial.suggest_int('win_length', 9, 12, step=1),
             'f_min': trial.suggest_int('f_min', 0, 100, step=10),
             'f_max': trial.suggest_int('f_max', 1800, 2500, step=100),
+            'multi_label': False
         }
         p['hop_length'] = int(p['win_length']/2)
 
@@ -231,5 +232,5 @@ def optuna_optimization(short_sample, n_trials):
 
 # TODO: threshold_label adapted
 if __name__ == '__main__':
-    # optuna_optimization(short_sample=False, n_trials=99999)
-    train(short_sample=False)
+    optuna_optimization(short_sample=False, n_trials=99999)
+    # train(short_sample=False)
